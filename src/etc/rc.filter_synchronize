@@ -94,7 +94,7 @@ function carp_check_version($rpc_client) {
 	return false;
 }
 
-function carp_sync_xml($rpc_client, $sections) {
+function carp_sync_xml($rpc_client, $sections, $hasync_client_id) {
 	global $config, $g;
 
 	if (file_exists("{$g['varrun_path']}/booting") || platform_booting()) {
@@ -163,18 +163,28 @@ function carp_sync_xml($rpc_client, $sections) {
 		}
 	}
 
-	if (array_path_enabled($config_copy, 'hasync', 'adminsync')) {
-		array_set_path($xml, 'hasync/adminsync', array_get_path($config_copy, 'hasync/adminsync'));
+	/* This if statement looks weird due to merging the new xmlrpc clients method 
+	 * with the old hasync single client node method.
+	 * The old way would enable 'hasync/adminsync' on the backup node when also
+	 * enabled on the master node.
+	 * This happening on a daisy-chain setup (master->backup1->backup2->...->backupN)
+	 * would enable 'hasync/adminsync' on every backup node in the chain.
+	 * For the moment, I've decided to remove this behavior in favor of more
+	 * control of each backup node's hasync configuration.
+	 * Might look back into this at a later time...
+	 */
+	if (array_path_enabled($config_copy, 'hasync/xmlrpcclients/{$hasync_client_id}', 'adminsync')) {
+		array_set_path($xml, 'hasync/adminsync', array_get_path($config_copy, 'hasync/xmlrpcclients/{$hasync_client_id}/adminsync'));
 	}
 
 	$resp = $rpc_client->xmlrpc_method('restore_config_section', $xml, 900);
 	if ($resp != null) {
 		$url = $rpc_client->getUrl();
 		update_filter_reload_status("XMLRPC sync successfully completed with {$url}.");
-		if (config_get_path('hasync/new_password')) {
+		if (config_get_path('hasync/xmlrpcclients/{$hasync_client_id}/new_password')) {
 			update_filter_reload_status("Updating XMLRPC sync password.");
-			config_set_path('hasync/password', config_get_path('hasync/new_password'));
-			config_del_path('hasync/new_password');
+			config_set_path('hasync/xmlrpcclients/{$hasync_client_id}/password', config_get_path('hasync/xmlrpcclients/{$hasync_client_id}/new_password'));
+			config_del_path('hasync/xmlrpcclients/{$hasync_client_id}/new_password');
 			write_config("Update XMLRPC sync password.");
 		}
 		return true;
@@ -188,113 +198,115 @@ if (platform_booting()) {
 
 if (config_get_path('hasync')) {
 	update_filter_reload_status("Building high availability sync information");
-	$hasync = config_get_path('hasync', []);
-	$sections = array();
 
-	if (empty($hasync['synchronizetoip'])) {
-		/* this gets hit on every filter sync on the secondary, a log here creates a lot of log spam and I never saw it actually log anything useful */
-		return;
-	}
+	foreach (config_get_path('hasync/xmlrpcclients', []) as $idx => $hasync_client) {
+    	$sections = array();
+        
+    	if (empty($hasync_client['synchronizetoip'])) {
+    		/* this gets hit on every filter sync on the secondary, a log here creates a lot of log spam and I never saw it actually log anything useful */
+    		continue;
+    	}
 
-	if ($hasync['synchronizerules'] != "") {
-		config_init_path('filter');
-		$sections[] = 'filter';
-	}
-	if ($hasync['synchronizenat'] != "") {
-		config_init_path('nat');
- 		$sections[] = 'nat';
-	}
-	if ($hasync['synchronizealiases'] != "") {
-		config_init_path('aliases');
-		$sections[] = 'aliases';
-	}
-	if ($hasync['synchronizedhcpd'] != "" and is_array(config_get_path('dhcpd'))) {
-		$sections[] = 'dhcpd';
-	}
-	if ($hasync['synchronizedhcrelay'] != "" and is_array(config_get_path('dhcrelay'))) {
-		$sections[] = 'dhcrelay';
-	}
-	if ($hasync['synchronizedhcrelay6'] != "" and is_array(config_get_path('dhcrelay6'))) {
-		$sections[] = 'dhcrelay6';
-	}
-	if ($hasync['synchronizewol'] != "") {
-		config_init_path('wol');
-		$sections[] = 'wol';
-	}
-	if ($hasync['synchronizetrafficshaper'] != "") {
-		config_init_path('shaper');
-		$sections[] = 'shaper';
-	}
-	if ($hasync['synchronizetrafficshaperlimiter'] != "") {
-		config_init_path('dnshaper');
-		$sections[] = 'dnshaper';
-	}
-	if ($hasync['synchronizestaticroutes'] != "") {
-		config_init_path('staticroutes/route');
-		config_init_path('gateways');
-		$sections[] = 'staticroutes';
-		$sections[] = 'gateways';
-	}
-	if ($hasync['synchronizevirtualip'] != "") {
-		config_init_path('virtualip');
-		$sections[] = 'virtualip';
-	}
-	if ($hasync['synchronizeipsec'] != "") {
-		config_init_path('ipsec');
-		$sections[] = 'ipsec';
-	}
-	if ($hasync['synchronizeopenvpn'] != "") {
-		config_init_path('openvpn');
-		$sections[] = 'openvpn';
-	}
-	if ($hasync['synchronizecerts'] != "" || $hasync['synchronizeopenvpn'] != "") {
-		config_init_path('cert');
-		config_init_path('ca');
-		config_init_path('crl');
-		$sections[] = 'cert';
-		$sections[] = 'ca';
-		$sections[] = 'crl';
-	}
-	if ($hasync['synchronizeusers'] != "") {
-		$sections[] = 'user';
-		$sections[] = 'group';
-	}
-	if ($hasync['synchronizeauthservers'] != "") {
-		config_init_path('authserver');
-		$sections[] = 'authserver';
-	}
-	if ($hasync['synchronizednsforwarder'] != "") {
-		if (is_array(config_get_path('dnsmasq'))) {
-			$sections[] = 'dnsmasq';
-		}
-		if (is_array(config_get_path('unbound'))) {
-			$sections[] = 'unbound';
-		}
-	}
-	if ($hasync['synchronizeschedules'] != "" || $hasync['synchronizerules'] != "") {
-		$sections[] = 'schedules';
-	}
-	if ($hasync['synchronizecaptiveportal'] != "") {
-		config_init_path('captiveportal');
-		$sections[] = 'captiveportal';
-	}
-	if ($hasync['synchronizecaptiveportal'] != "" and is_array(config_get_path('voucher'))) {
-		$sections[] = 'voucher';
-	}
+    	if ($hasync_client['synchronizerules'] != "") {
+    		config_init_path('filter');
+    		$sections[] = 'filter';
+    	}
+    	if ($hasync_client['synchronizenat'] != "") {
+    		config_init_path('nat');
+     		$sections[] = 'nat';
+    	}
+    	if ($hasync_client['synchronizealiases'] != "") {
+    		config_init_path('aliases');
+    		$sections[] = 'aliases';
+    	}
+    	if ($hasync_client['synchronizedhcpd'] != "" and is_array(config_get_path('dhcpd'))) {
+    		$sections[] = 'dhcpd';
+    	}
+    	if ($hasync_client['synchronizedhcrelay'] != "" and is_array(config_get_path('dhcrelay'))) {
+    		$sections[] = 'dhcrelay';
+    	}
+    	if ($hasync_client['synchronizedhcrelay6'] != "" and is_array(config_get_path('dhcrelay6'))) {
+    		$sections[] = 'dhcrelay6';
+    	}
+    	if ($hasync_client['synchronizewol'] != "") {
+    		config_init_path('wol');
+    		$sections[] = 'wol';
+    	}
+    	if ($hasync_client['synchronizetrafficshaper'] != "") {
+    		config_init_path('shaper');
+    		$sections[] = 'shaper';
+    	}
+    	if ($hasync_client['synchronizetrafficshaperlimiter'] != "") {
+    		config_init_path('dnshaper');
+    		$sections[] = 'dnshaper';
+    	}
+    	if ($hasync_client['synchronizestaticroutes'] != "") {
+    		config_init_path('staticroutes/route');
+    		config_init_path('gateways');
+    		$sections[] = 'staticroutes';
+    		$sections[] = 'gateways';
+    	}
+    	if ($hasync_client['synchronizevirtualip'] != "") {
+    		config_init_path('virtualip');
+    		$sections[] = 'virtualip';
+    	}
+    	if ($hasync_client['synchronizeipsec'] != "") {
+    		config_init_path('ipsec');
+    		$sections[] = 'ipsec';
+    	}
+    	if ($hasync_client['synchronizeopenvpn'] != "") {
+    		config_init_path('openvpn');
+    		$sections[] = 'openvpn';
+    	}
+    	if ($hasync_client['synchronizecerts'] != "" || $hasync_client['synchronizeopenvpn'] != "") {
+    		config_init_path('cert');
+    		config_init_path('ca');
+    		config_init_path('crl');
+    		$sections[] = 'cert';
+    		$sections[] = 'ca';
+    		$sections[] = 'crl';
+    	}
+    	if ($hasync_client['synchronizeusers'] != "") {
+    		$sections[] = 'user';
+    		$sections[] = 'group';
+    	}
+    	if ($hasync_client['synchronizeauthservers'] != "") {
+    		config_init_path('authserver');
+    		$sections[] = 'authserver';
+    	}
+    	if ($hasync_client['synchronizednsforwarder'] != "") {
+    		if (is_array(config_get_path('dnsmasq'))) {
+    			$sections[] = 'dnsmasq';
+    		}
+    		if (is_array(config_get_path('unbound'))) {
+    			$sections[] = 'unbound';
+    		}
+    	}
+    	if ($hasync_client['synchronizeschedules'] != "" || $hasync_client['synchronizerules'] != "") {
+    		$sections[] = 'schedules';
+    	}
+    	if ($hasync_client['synchronizecaptiveportal'] != "") {
+    		config_init_path('captiveportal');
+    		$sections[] = 'captiveportal';
+    	}
+    	if ($hasync_client['synchronizecaptiveportal'] != "" and is_array(config_get_path('voucher'))) {
+    		$sections[] = 'voucher';
+    	}
 
-	if (is_array($sections) && count($sections) <= 0) {
-		log_error("Nothing has been configured to be synched. Skipping....");
-		return;
-	}
+    	if (is_array($sections) && count($sections) <= 0) {
+    		log_error("Nothing has been configured to be synched. Skipping....");
+    		return;
+    	}
 
-	$rpc_client = new pfsense_xmlrpc_client();
+    	$rpc_client = new pfsense_xmlrpc_client($hasync_client);
 
-	if (!carp_check_version($rpc_client)) {
-		return;
-	}
+    	if (!carp_check_version($rpc_client)) {
+    		return;
+    	}
 
-	update_filter_reload_status("Signaling CARP reload signal...");
-	if (!carp_sync_xml($rpc_client, $sections)) {
-		return;
+    	update_filter_reload_status("Signaling CARP reload signal...");
+    	if (!carp_sync_xml($rpc_client, $sections, $idx)) {
+    		return;
+    	}
 	}
 }

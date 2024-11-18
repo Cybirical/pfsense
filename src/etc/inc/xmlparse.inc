@@ -51,7 +51,7 @@ function listtags() {
 		'schedule', 'service', 'servernat', 'servers', 'sshkeyfile',
 		'serversdisabled', 'shellcmd', 'staticmap', 'subqueue', 'switch', 'swport',
 		'timerange', 'tunnel', 'user', 'vip', 'virtual_server', 'vlan', 'vlangroup', 'voucherdbfile',
-		'vxlan', 'wgpeer', 'winsserver', 'wolentry', 'widget', 'xmldatafile'
+		'vxlan', 'wgpeer', 'winsserver', 'wolentry', 'widget', 'xmldatafile', 'xmlrpcclients'
 	);
 	return array_flip($ret);
 }

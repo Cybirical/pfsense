@@ -839,10 +839,12 @@ function local_user_set_password(&$user, $password) {
 			break;
 	}
 
-	if (($user['name'] == config_get_path('hasync/username')) &&
-	    (config_get_path('hasync/adminsync') == 'on')) {
-		config_set_path('hasync/new_password', $password);
-	}
+    foreach (config_get_path('hasync/xmlrpcclients', []) as $idx => $hasync_client) {
+    	if (($user['name'] == $hasync_client['username']) &&
+    	    ($hasync_client['adminsync'] == 'on')) {
+    		config_set_path('hasync/xmlrpcclients/{$idx}/new_password', $password);
+    	}
+    }
 }
 
 function local_user_get_groups($user, $all = false) {

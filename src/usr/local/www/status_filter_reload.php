@@ -64,7 +64,13 @@ include("head.inc");
 			<form action="status_filter_reload.php" method="post" name="filter">
 				<button type="submit" class="btn btn-success" value="<?=gettext("Reload Filter")?>" name="reloadfilter" id="reloadfilter"><i class="fa fa-refresh icon-embed-btn"></i><?=gettext("Reload Filter")?></button>
 <?php
-if ($config['hasync'] && $config['hasync']["synchronizetoip"] != ""): ?>
+/* The old if statement checked if 'hasync/synchronizetoip' is not empty.
+ * With the new xmlrpc clients method, a client cannot be created if its
+ * 'synchronizetoip' is empty or invalid.
+ * Therefore, checking if there are any xmlrpc clients is equivalent to
+ * checking if all clients' 'synchronizetoip' value is not empty.
+ */
+if ($config['hasync'] && $config['hasync']["xmlrpcclients"]): ?>
 				<button type="submit" class="btn btn-info" value="<?=gettext("Force Config Sync")?>" name="syncfilter" id="syncfilter"><i class="fa fa-clone icon-embed-btn"></i><?=gettext("Force Config Sync")?></button>
 <?php
 endif;

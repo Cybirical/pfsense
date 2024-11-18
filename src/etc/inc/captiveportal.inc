@@ -378,7 +378,7 @@ EOD;
 			echo "done\n";
 
 			if (isset($cpcfg['preservedb']) || $reload_rules ||
-			    captiveportal_xmlrpc_sync_get_details($syncip, $syncport, $syncuser, $syncpass)) {
+			    captiveportal_xmlrpc_sync_get_details_check($syncip, $syncport, $syncuser, $syncpass)) {
 
 				$connected_users = captiveportal_read_db();
 				if (!empty($connected_users)) {
@@ -889,24 +889,31 @@ function captiveportal_disconnect($dbent, $term_cause = 1, $stop_time = null, $c
 	}
 
 	// XMLRPC Call over to the backup node if necessary
-	if (captiveportal_xmlrpc_sync_get_details($syncip, $syncport,
-	    $syncuser, $syncpass, $carp_loop)) {
-		$rpc_client = new pfsense_xmlrpc_client();
-		$rpc_client->setConnectionData($syncip, $syncport, $syncuser, $syncpass);
-		$rpc_client->set_noticefile("CaptivePortalUserSync");
-		$arguments = array(
-			'sessionid' => $dbent[5],
-			'term_cause' => $term_cause,
-			'stop_time' => $stop_time
-		);
+	/* The array of empty array triggers the check for backwardsync configuration
+	 * when iterating over xmlrpc clients to sync.
+	 * This is a lazy alternative to duplicating code in the below if statement
+	 * for both backwardsync and hasync_clients.
+	 */
+    foreach (array_merge([[]], config_get_path('hasync/xmlrpcclients', [])) as $hasync_client) {
+    	if (captiveportal_xmlrpc_sync_get_details($syncip, $syncport,
+    	    $syncuser, $syncpass, $hasync_client, $carp_loop)) {
+    		$rpc_client = new pfsense_xmlrpc_client();
+    		$rpc_client->setConnectionData($syncip, $syncport, $syncuser, $syncpass);
+    		$rpc_client->set_noticefile("CaptivePortalUserSync");
+    		$arguments = array(
+    			'sessionid' => $dbent[5],
+    			'term_cause' => $term_cause,
+    			'stop_time' => $stop_time
+    		);
 
-		$rpc_client->xmlrpc_method('captive_portal_sync',
-			array(
-				'op' => 'disconnect_user',
-				'zone' => $cpzone,
-				'session' => base64_encode(serialize($arguments))
-			)
-		);
+    		$rpc_client->xmlrpc_method('captive_portal_sync',
+    			array(
+    				'op' => 'disconnect_user',
+    				'zone' => $cpzone,
+    				'session' => base64_encode(serialize($arguments))
+    			)
+    		);
+    	}
 	}
 	return true;
 }
@@ -933,22 +940,29 @@ function captiveportal_disconnect_client($sessionid, $term_cause = 1, $logoutRea
 function captiveportal_disconnect_all($term_cause = 6, $logoutReason = "DISCONNECT", $carp_loop = false) {
 	global $g, $config, $cpzone, $cpzoneid;
 
-	if (captiveportal_xmlrpc_sync_get_details($syncip, $syncport, $syncuser, $syncpass, $carp_loop)) {
-		$rpc_client = new pfsense_xmlrpc_client();
-		$rpc_client->setConnectionData($syncip, $syncport, $syncuser, $syncpass);
-		$rpc_client->set_noticefile("CaptivePortalUserSync");
-		$arguments = array(
-			'term_cause' => $term_cause,
-			'logout_reason' => $logoutReason
-		);
+	/* The array of empty array triggers the check for backwardsync configuration
+	 * when iterating over xmlrpc clients to sync.
+	 * This is a lazy alternative to duplicating code in the below if statement
+	 * for both backwardsync and hasync_clients.
+	 */
+	foreach (array_merge([[]], config_get_path('hasync/xmlrpcclients', [])) as $hasync_client) {
+    	if (captiveportal_xmlrpc_sync_get_details($syncip, $syncport, $syncuser, $syncpass, $hasync_client, $carp_loop)) {
+    		$rpc_client = new pfsense_xmlrpc_client();
+    		$rpc_client->setConnectionData($syncip, $syncport, $syncuser, $syncpass);
+    		$rpc_client->set_noticefile("CaptivePortalUserSync");
+    		$arguments = array(
+    			'term_cause' => $term_cause,
+    			'logout_reason' => $logoutReason
+    		);
 
-		$rpc_client->xmlrpc_method('captive_portal_sync',
-			array(
-				'op' => 'disconnect_all',
-				'zone' => $cpzone,
-				'arguments' => base64_encode(serialize($arguments))
-			)
-		);
+    		$rpc_client->xmlrpc_method('captive_portal_sync',
+    			array(
+    				'op' => 'disconnect_all',
+    				'zone' => $cpzone,
+    				'arguments' => base64_encode(serialize($arguments))
+    			)
+    		);
+    	}
 	}
 	/* check if we're pruning old entries and eventually wait */
 	$rcprunelock = try_lock("rcprunecaptiveportal{$cpzone}", 15);
@@ -1456,17 +1470,24 @@ function captiveportal_remove_entries($remove, $carp_loop = false) {
 	$query .= ")";
 	captiveportal_write_db($query);
 
-	if (captiveportal_xmlrpc_sync_get_details($syncip, $syncport, $syncuser, $syncpass, $carp_loop)) {
-		$rpc_client = new pfsense_xmlrpc_client();
-		$rpc_client->setConnectionData($syncip, $syncport, $syncuser, $syncpass);
-		$rpc_client->set_noticefile("CaptivePortalUserSync");
-		$rpc_client->xmlrpc_method('captive_portal_sync',
-			array(
-				'op' => 'remove_entries',
-				'zone' => $cpzone,
-				'entries' => base64_encode(serialize($remove))
-			)
-		);
+	/* The array of empty array triggers the check for backwardsync configuration
+	 * when iterating over xmlrpc clients to sync.
+	 * This is a lazy alternative to duplicating code in the below if statement
+	 * for both backwardsync and hasync_clients.
+	 */
+	foreach (array_merge([[]], config_get_path('hasync/xmlrpcclients', [])) as $hasync_client) {
+    	if (captiveportal_xmlrpc_sync_get_details($syncip, $syncport, $syncuser, $syncpass, $hasync_client, $carp_loop)) {
+    		$rpc_client = new pfsense_xmlrpc_client();
+    		$rpc_client->setConnectionData($syncip, $syncport, $syncuser, $syncpass);
+    		$rpc_client->set_noticefile("CaptivePortalUserSync");
+    		$rpc_client->xmlrpc_method('captive_portal_sync',
+    			array(
+    				'op' => 'remove_entries',
+    				'zone' => $cpzone,
+    				'entries' => base64_encode(serialize($remove))
+    			)
+    		);
+    	}
 	}
 	return true;
 }
@@ -2154,31 +2175,38 @@ function portal_allow($clientip, $clientmac, $username, $password = null, $redir
 					$sessionid, // sessionid
 					time());  // start time
 			}
-			if (captiveportal_xmlrpc_sync_get_details($syncip, $syncport, $syncuser, $syncpass, isset($existing_sessionid))) {
-				// $existing_sessionid prevent carp loop : only forward
-				// the connection to the other node if we generated the sessionid by ourselves
-				$rpc_client = new pfsense_xmlrpc_client();
-				$rpc_client->setConnectionData($syncip, $syncport, $syncuser, $syncpass);
-				$rpc_client->set_noticefile("CaptivePortalUserSync");
-				$arguments = array(
-					'clientip' => $clientip,
-					'clientmac' => $clientmac,
-					'username' => $username,
-					'password' => $password,
-					'attributes' => $attributes,
-					'allow_time' => $allow_time,
-					'authmethod' => $authmethod,
-					'context' => $context,
-					'sessionid' => $sessionid
-				);
+			/* The array of empty array triggers the check for backwardsync configuration
+			* when iterating over xmlrpc clients to sync.
+			* This is a lazy alternative to duplicating code in the below if statement
+			* for both backwardsync and hasync_clients.
+			*/
+			foreach (array_merge([[]], config_get_path('hasync/xmlrpcclients', [])) as $hasync_client) {
+    			if (captiveportal_xmlrpc_sync_get_details($syncip, $syncport, $syncuser, $syncpass, $hasync_client, isset($existing_sessionid))) {
+    				// $existing_sessionid prevent carp loop : only forward
+    				// the connection to the other node if we generated the sessionid by ourselves
+    				$rpc_client = new pfsense_xmlrpc_client();
+    				$rpc_client->setConnectionData($syncip, $syncport, $syncuser, $syncpass);
+    				$rpc_client->set_noticefile("CaptivePortalUserSync");
+    				$arguments = array(
+    					'clientip' => $clientip,
+    					'clientmac' => $clientmac,
+    					'username' => $username,
+    					'password' => $password,
+    					'attributes' => $attributes,
+    					'allow_time' => $allow_time,
+    					'authmethod' => $authmethod,
+    					'context' => $context,
+    					'sessionid' => $sessionid
+    				);
 
-				$rpc_client->xmlrpc_method('captive_portal_sync',
-					array(
-						'op' => 'connect_user',
-						'zone' => $cpzone,
-						'user' => base64_encode(serialize($arguments))
-					)
-				);
+    				$rpc_client->xmlrpc_method('captive_portal_sync',
+    					array(
+    						'op' => 'connect_user',
+    						'zone' => $cpzone,
+    						'user' => base64_encode(serialize($arguments))
+    					)
+    				);
+    			}
 			}
 		}
 	} else {
@@ -2311,22 +2339,29 @@ function xmlrpc_sync_usedmacs($usedmacs) {
 	global $config, $cpzone;
 
 	// XMLRPC Call over to the other node
-	if (captiveportal_xmlrpc_sync_get_details($syncip, $syncport,
-	    $syncuser, $syncpass, $carp_loop)) {
-		$rpc_client = new pfsense_xmlrpc_client();
-		$rpc_client->setConnectionData($syncip, $syncport, $syncuser, $syncpass);
-		$rpc_client->set_noticefile("CaptivePortalUsedmacsSync");
-		$arguments = array(
-			'usedmacs' => $usedmacs
-		);
+	/* The array of empty array triggers the check for backwardsync configuration
+	 * when iterating over xmlrpc clients to sync.
+	 * This is a lazy alternative to duplicating code in the below if statement
+	 * for both backwardsync and hasync_clients.
+	 */
+	foreach (array_merge([[]], config_get_path('hasync/xmlrpcclients', [])) as $hasync_client) {
+    	if (captiveportal_xmlrpc_sync_get_details($syncip, $syncport,
+    	    $syncuser, $syncpass, $hasync_client, $carp_loop)) {
+    		$rpc_client = new pfsense_xmlrpc_client();
+    		$rpc_client->setConnectionData($syncip, $syncport, $syncuser, $syncpass);
+    		$rpc_client->set_noticefile("CaptivePortalUsedmacsSync");
+    		$arguments = array(
+    			'usedmacs' => $usedmacs
+    		);
 
-		$rpc_client->xmlrpc_method('captive_portal_sync',
-			array(
-				'op' => 'write_usedmacs',
-				'zone' => $cpzone,
-				'arguments' => base64_encode(serialize($arguments))
-			)
-		);
+    		$rpc_client->xmlrpc_method('captive_portal_sync',
+    			array(
+    				'op' => 'write_usedmacs',
+    				'zone' => $cpzone,
+    				'arguments' => base64_encode(serialize($arguments))
+    			)
+    		);
+    	}
 	}
 }
 

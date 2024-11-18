@@ -5,7 +5,7 @@
  * part of pfSense (https://www.pfsense.org)
  * Copyright (c) 2007-2013 BSD Perimeter
  * Copyright (c) 2013-2016 Electric Sheep Fencing
- * Copyright (c) 2014-2023 Rubicon Communications, LLC (Netgate)
+ * Copyright (c) 2014-2024 Rubicon Communications, LLC (Netgate)
  * Copyright (c) 2007 Marcel Wiget <mwiget@mac.com>
  * All rights reserved.
  *
@@ -31,17 +31,18 @@ if (!function_exists('captiveportal_syslog')) {
 	require_once("captiveportal.inc");
 }
 
-function captiveportal_xmlrpc_sync_get_details(&$syncip, &$port, &$username, &$password, $carp_loop = false) {
-	global $config, $cpzone;
+function captiveportal_xmlrpc_sync_get_details(&$syncip, &$port, &$username, &$password, $hasync_client = [], $carp_loop = false) {
+	global $cpzone;
 
-	if (isset($config['captiveportal'][$cpzone]['enablebackwardsync']) && !$carp_loop
-	    && captiveportal_ha_is_node_in_backup_mode($cpzone)) {
+	if (config_path_enabled("captiveportal/{$cpzone}", "enablebackwardsync") && !$carp_loop
+	    && captiveportal_ha_is_node_in_backup_mode($cpzone) 
+	    && empty($hasync_client)) {
 		$syncip = config_get_path("captiveportal/{$cpzone}/backwardsyncip");
 		$username = config_get_path("captiveportal/{$cpzone}/backwardsyncuser");
 		$password = config_get_path("captiveportal/{$cpzone}/backwardsyncpassword");
 		$port = config_get_path('system/webgui/port');
 		if (empty($port)) { // if port is empty lets rely on the protocol selection
-			if ($config['system']['webgui']['protocol'] == "http") {
+			if (config_get_path('system/webgui/protocol') == "http") {
 				$port = "80";
 			} else {
 				$port = "443";
@@ -50,25 +51,24 @@ function captiveportal_xmlrpc_sync_get_details(&$syncip, &$port, &$username, &$p
 		return true;
 	}
 
-	if (!is_array($config['hasync']) ||
-	    empty($config['hasync']['synchronizetoip']) ||
-	    $config['hasync']['synchronizecaptiveportal'] == "" ||
+	if (empty($hasync_client['synchronizetoip']) ||
+	    $hasync_client['synchronizecaptiveportal'] == "" ||
 	    $carp_loop == true) {
 		return false;
 	}
 
-	$syncip = config_get_path('hasync/synchronizetoip');
-	$password = config_get_path('hasync/password');
-	if (empty($config['hasync']['username'])) {
+	$syncip = $hasync_client['synchronizetoip'];
+	$password = $hasync_client['password'];
+	if (empty($hasync_client['username'])) {
 		$username = "admin";
 	} else {
-		$username = config_get_path('hasync/username');
+		$username = $hasync_client['username'];
 	}
 
 	/* if port is empty lets rely on the protocol selection */
 	$port = config_get_path('system/webgui/port');
 	if (empty($port)) {
-		if ($config['system']['webgui']['protocol'] == "http") {
+		if (config_get_path('system/webgui/protocol') == "http") {
 			$port = "80";
 		} else {
 			$port = "443";
@@ -78,19 +78,32 @@ function captiveportal_xmlrpc_sync_get_details(&$syncip, &$port, &$username, &$p
 	return true;
 }
 
+function captiveportal_xmlrpc_sync_get_details_check(&$syncip, &$port, &$username, &$password) {
+	/* The array of empty array triggers the check for backwardsync configuration
+	 * when iterating over xmlrpc clients to sync.
+	 * This is a lazy alternative to duplicating code in the below if statement
+	 * for both backwardsync and hasync_clients.
+	 */
+	foreach (array_merge([[]], config_get_path('hasync/xmlrpcclients', [])) as $hasync_client) {
+        if (captiveportal_xmlrpc_sync_get_details($syncip, $syncport,
+            $syncuser, $syncpass, $hasync_client, $carp_loop)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 function voucher_expire($voucher_received, $carp_loop = false) {
-	global $g, $config, $cpzone, $cpzoneid;
+	global $g, $cpzone, $cpzoneid;
 
 	$voucherlck = lock("voucher{$cpzone}", LOCK_EX);
 
 	// read rolls into assoc array with rollid as key and minutes as value
 	$tickets_per_roll = array();
 	$minutes_per_roll = array();
-	if (is_array($config['voucher'][$cpzone]['roll'])) {
-		foreach ($config['voucher'][$cpzone]['roll'] as $rollent) {
-			$tickets_per_roll[$rollent['number']] = $rollent['count'];
-			$minutes_per_roll[$rollent['number']] = $rollent['minutes'];
-		}
+	foreach (config_get_path("voucher/{$cpzone}/roll", []) as $rollent) {
+		$tickets_per_roll[$rollent['number']] = $rollent['count'];
+		$minutes_per_roll[$rollent['number']] = $rollent['minutes'];
 	}
 
 	// split into an array. Useful for multiple vouchers given
@@ -103,7 +116,7 @@ function voucher_expire($voucher_received, $carp_loop = false) {
 	foreach ($a_vouchers_received as $voucher) {
 		$v = escapeshellarg($voucher);
 		if (strlen($voucher) < 5) {
-			captiveportal_syslog("${voucher} invalid: Too short!");
+			captiveportal_syslog("{$voucher} invalid: Too short!");
 			continue;   // seems too short to be a voucher!
 		}
 
@@ -137,7 +150,7 @@ function voucher_expire($voucher_received, $carp_loop = false) {
 				/* Check if this voucher has any active sessions */
 				$cpentry = captiveportal_read_db("WHERE username = '{$voucher}'");
 				if (!empty($cpentry) && !empty($cpentry[0])) {
-					if (empty($cpzoneid) && !empty($config['captiveportal'][$cpzone])) {
+					if (empty($cpzoneid) && !empty(config_get_path("captiveportal/{$cpzone}"))) {
 						$cpzoneid = config_get_path("captiveportal/{$cpzone}/zoneid");
 					}
 					$cpentry = $cpentry[0];
@@ -186,23 +199,25 @@ function voucher_expire($voucher_received, $carp_loop = false) {
 	}
 
 	// XMLRPC Call over to the other node
-	if (captiveportal_xmlrpc_sync_get_details($syncip, $syncport,
-	    $syncuser, $syncpass, $carp_loop)) {
-		$rpc_client = new pfsense_xmlrpc_client();
-		$rpc_client->setConnectionData($syncip, $syncport, $syncuser, $syncpass);
-		$rpc_client->set_noticefile("CaptivePortalVouchersSync");
-		$arguments = array(
-			'active_and_used_vouchers_bitmasks' => $bitstring,
-			'active_vouchers' => $active_vouchers
-		);
+    foreach (array_merge([[]], config_get_path('hasync/xmlrpcclients', [])) as $hasync_client) {
+    	if (captiveportal_xmlrpc_sync_get_details($syncip, $syncport,
+    	    $syncuser, $syncpass, $hasync_client, $carp_loop)) {
+    		$rpc_client = new pfsense_xmlrpc_client();
+    		$rpc_client->setConnectionData($syncip, $syncport, $syncuser, $syncpass);
+    		$rpc_client->set_noticefile("CaptivePortalVouchersSync");
+    		$arguments = array(
+    			'active_and_used_vouchers_bitmasks' => $bitstring,
+    			'active_vouchers' => $active_vouchers
+    		);
 
-		$rpc_client->xmlrpc_method('captive_portal_sync',
-			array(
-				'op' => 'write_vouchers',
-				'zone' => $cpzone,
-				'arguments' => base64_encode(serialize($arguments))
-			)
-		);
+    		$rpc_client->xmlrpc_method('captive_portal_sync',
+    			array(
+    				'op' => 'write_vouchers',
+    				'zone' => $cpzone,
+    				'arguments' => base64_encode(serialize($arguments))
+    			)
+    		);
+    	}
 	}
 	return true;
 }
@@ -215,9 +230,9 @@ function voucher_expire($voucher_received, $carp_loop = false) {
  * but return a more verbose error and result message back
  */
 function voucher_auth($voucher_received, $test = 0, $carp_loop = false) {
-	global $g, $config, $cpzone, $dbc;
+	global $g, $cpzone, $dbc;
 
-	if (!isset($config['voucher'][$cpzone]['enable'])) {
+	if (!config_path_enabled("voucher/{$cpzone}")) {
 		return 0;
 	}
 
@@ -226,11 +241,9 @@ function voucher_auth($voucher_received, $test = 0, $carp_loop = false) {
 	// read rolls into assoc array with rollid as key and minutes as value
 	$tickets_per_roll = array();
 	$minutes_per_roll = array();
-	if (is_array($config['voucher'][$cpzone]['roll'])) {
-		foreach ($config['voucher'][$cpzone]['roll'] as $rollent) {
-			$tickets_per_roll[$rollent['number']] = $rollent['count'];
-			$minutes_per_roll[$rollent['number']] = $rollent['minutes'];
-		}
+	foreach (config_get_path("voucher/{$cpzone}/roll", []) as $rollent) {
+		$tickets_per_roll[$rollent['number']] = $rollent['count'];
+		$minutes_per_roll[$rollent['number']] = $rollent['minutes'];
 	}
 
 	// split into an array. Useful for multiple vouchers given
@@ -362,25 +375,32 @@ function voucher_auth($voucher_received, $test = 0, $carp_loop = false) {
 	voucher_write_active_db($first_voucher_roll, $active_vouchers[$first_voucher_roll]);
 
 	// XMLRPC Call over to the other node
-	if (captiveportal_xmlrpc_sync_get_details($syncip, $syncport,
-	    $syncuser, $syncpass, $carp_loop)) {
-		$rpc_client = new pfsense_xmlrpc_client();
-		$rpc_client->setConnectionData($syncip, $syncport, $syncuser, $syncpass);
-		$rpc_client->set_noticefile("CaptivePortalVouchersSync");
-		$arguments = array(
-			'active_and_used_vouchers_bitmasks' => $bitstring,
-			'active_vouchers' => array(
-				$first_voucher_roll => $active_vouchers[$first_voucher_roll]
-			)
-		);
+	/* The array of empty array triggers the check for backwardsync configuration
+	 * when iterating over xmlrpc clients to sync.
+	 * This is a lazy alternative to duplicating code in the below if statement
+	 * for both backwardsync and hasync_clients.
+	 */
+    foreach (array_merge([[]], config_get_path('hasync/xmlrpcclients', [])) as $hasync_client) {
+    	if (captiveportal_xmlrpc_sync_get_details($syncip, $syncport,
+    	    $syncuser, $syncpass, $hasync_client, $carp_loop)) {
+    		$rpc_client = new pfsense_xmlrpc_client();
+    		$rpc_client->setConnectionData($syncip, $syncport, $syncuser, $syncpass);
+    		$rpc_client->set_noticefile("CaptivePortalVouchersSync");
+    		$arguments = array(
+    			'active_and_used_vouchers_bitmasks' => $bitstring,
+    			'active_vouchers' => array(
+    				$first_voucher_roll => $active_vouchers[$first_voucher_roll]
+    			)
+    		);
 
-		$rpc_client->xmlrpc_method('captive_portal_sync',
-			array(
-				'op' => 'write_vouchers',
-				'zone' => $cpzone,
-				'arguments' => base64_encode(serialize($arguments))
-			)
-		);
+    		$rpc_client->xmlrpc_method('captive_portal_sync',
+    			array(
+    				'op' => 'write_vouchers',
+    				'zone' => $cpzone,
+    				'arguments' => base64_encode(serialize($arguments))
+    			)
+    		);
+    	}
 	}
 
 	/* perform in-use vouchers expiration using check_reload_status */
@@ -392,37 +412,35 @@ function voucher_auth($voucher_received, $test = 0, $carp_loop = false) {
 }
 
 function voucher_configure() {
-	global $config, $g, $cpzone;
+	global $g, $cpzone;
 
-	if (is_array($config['voucher'])) {
-		foreach ($config['voucher'] as $voucherzone => $vcfg) {
-			if (platform_booting()) {
-				echo gettext("Enabling voucher support... ");
-			}
-			$cpzone = $voucherzone;
-			$error = voucher_configure_zone();
-			if (platform_booting()) {
-				if ($error) {
-					echo "error\n";
-				} else {
-					echo "done\n";
-				}
+	foreach (config_get_path('voucher', []) as $voucherzone => $vcfg) {
+		if (is_platform_booting()) {
+			echo gettext("Enabling voucher support... ");
+		}
+		$cpzone = $voucherzone;
+		$error = voucher_configure_zone();
+		if (is_platform_booting()) {
+			if ($error) {
+				echo "error\n";
+			} else {
+				echo "done\n";
 			}
 		}
 	}
 }
 
 function voucher_configure_zone() {
-	global $config, $g, $cpzone;
+	global $g, $cpzone;
 
-	if (!isset($config['voucher'][$cpzone]['enable'])) {
+	if (!config_path_enabled("voucher/{$cpzone}")) {
 		return 0;
 	}
 
 	$voucherlck = lock("voucher{$cpzone}", LOCK_EX);
 
 	/* write public key used to verify vouchers */
-	$pubkey = base64_decode($config['voucher'][$cpzone]['publickey']);
+	$pubkey = base64_decode(config_get_path("voucher/{$cpzone}/publickey"));
 	$fd = fopen("{$g['varetc_path']}/voucher_{$cpzone}.public", "w");
 	if (!$fd) {
 		captiveportal_syslog("Voucher error: cannot write voucher.public");
@@ -440,7 +458,8 @@ function voucher_configure_zone() {
 		unlock($voucherlck);
 		return 1;
 	}
-	fwrite($fd, "{$config['voucher'][$cpzone]['rollbits']},{$config['voucher'][$cpzone]['ticketbits']},{$config['voucher'][$cpzone]['checksumbits']},{$config['voucher'][$cpzone]['magic']},{$config['voucher'][$cpzone]['charset']}\n");
+	$voucher_config = config_get_path("voucher/{$cpzone}", []);
+	fwrite($fd, "{$voucher_config['rollbits']},{$voucher_config['ticketbits']},{$voucher_config['checksumbits']},{$voucher_config['magic']},{$voucher_config['charset']}\n");
 	fclose($fd);
 	@chmod("{$g['varetc_path']}/voucher_{$cpzone}.cfg", 0600);
 	unlock($voucherlck);
@@ -567,15 +586,13 @@ function voucher_log($priority, $message) {
  * Called during reboot -> system_reboot_cleanup() and every active voucher change
  */
 function voucher_save_db_to_config() {
-	global $config, $g;
+	global $g;
 
-	if (is_array($config['voucher'])) {
-		foreach ($config['voucher'] as $zone => $vcfg) {
-			if (isset($config['voucher'][$zone]['enable']) && is_array($config['voucher'][$zone]['roll'])) {
-				foreach ($config['voucher'][$zone]['roll'] as $key => $rollent) {
-					// read_active_db will remove expired vouchers that are still active
-					voucher_read_active_db($rollent['number']);
-				}
+	foreach (config_get_path('voucher', []) as $zone => $vcfg) {
+		if (config_path_enabled("voucher/{$zone}")) {
+			foreach (config_get_path("voucher/{$zone}/roll", []) as $key => $rollent) {
+				// read_active_db will remove expired vouchers that are still active
+				voucher_read_active_db($rollent['number']);
 			}
 		}
 	}

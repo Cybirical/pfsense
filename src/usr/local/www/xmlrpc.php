@@ -117,9 +117,10 @@ class pfsense_xmlrpc_server {
 		$this->remote_addr = $_SERVER['REMOTE_ADDR'];
 
 		/* grab sync to ip if enabled */
-		if (isset($config['hasync']['synchronizetoip']) &&
-		    $config['hasync']['synchronizetoip'] == $this->remote_addr) {
-			$this->loop_detected = true;
+		foreach (config_get_path('hasync/xmlrpcclients', []) as $hasync_client) {
+    		if ($hasync_client['synchronizetoip'] == $this->remote_addr) {
+    			$this->loop_detected = true;
+    		}
 		}
 	}
 

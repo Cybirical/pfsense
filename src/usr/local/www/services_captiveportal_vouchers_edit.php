@@ -122,15 +122,22 @@ if ($_POST['save']) {
 			voucher_write_active_db($rollent['number'], array());	// create empty DB
 			voucher_log(LOG_INFO, sprintf(gettext('All %1$s vouchers from Roll %2$s marked unused'), $rollent['count'], $rollent['number']));
 
-			if (captiveportal_xmlrpc_sync_get_details($syncip, $syncport,
-				$syncuser, $syncpass, $carp_loop)) {
-				$rpc_client = new pfsense_xmlrpc_client();
-				$rpc_client->setConnectionData($syncip, $syncport, $syncuser, $syncpass);
-				$rpc_client->set_noticefile("CaptivePortalVouchersSync");
-				$arguments = array('active_and_used_vouchers_bitmasks' => array($rollent['number'] => base64_decode($rollent['used'])),
-				'active_vouchers' => array($rollent['number'] => array()));
+			/* The array of empty array triggers the check for backwardsync configuration
+			 * when iterating over xmlrpc clients to sync.
+			 * This is a lazy alternative to duplicating code in the below if statement
+			 * for both backwardsync and hasync_clients.
+			 */
+    		foreach (array_merge([[]], config_get_path('hasync/xmlrpcclients', [])) as $hasync_client) {
+    			if (captiveportal_xmlrpc_sync_get_details($syncip, $syncport,
+    				$syncuser, $syncpass, $hasync_client, $carp_loop)) {
+    				$rpc_client = new pfsense_xmlrpc_client();
+    				$rpc_client->setConnectionData($syncip, $syncport, $syncuser, $syncpass);
+    				$rpc_client->set_noticefile("CaptivePortalVouchersSync");
+    				$arguments = array('active_and_used_vouchers_bitmasks' => array($rollent['number'] => base64_decode($rollent['used'])),
+    				'active_vouchers' => array($rollent['number'] => array()));
 
-				$rpc_client->xmlrpc_method('captive_portal_sync', array('op' => 'write_vouchers', 'zone' => $cpzone, 'arguments' => base64_encode(serialize($arguments))));
+    				$rpc_client->xmlrpc_method('captive_portal_sync', array('op' => 'write_vouchers', 'zone' => $cpzone, 'arguments' => base64_encode(serialize($arguments))));
+    			}
 			}
 		} else {
 			// existing roll has been modified but without changing the count

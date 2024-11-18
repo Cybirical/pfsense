@@ -667,7 +667,7 @@ $section->addInput(new Form_Input(
 	$pconfig['blockedmacsurl']
 ))->setHelp('Blocked MAC addresses will be redirected to this URL when attempting access.');
 
-if (captiveportal_xmlrpc_sync_get_details($tmpsyncip, $tmpport, $tmpusername, $tmppassword)) {
+if (captiveportal_xmlrpc_sync_get_details_check($tmpsyncip, $tmpport, $tmpusername, $tmppassword)) {
 	$section->addInput(new Form_Checkbox(
 	'preservedb_disabled',
 	'Preserve users database',

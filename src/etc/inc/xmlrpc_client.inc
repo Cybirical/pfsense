@@ -26,20 +26,19 @@ class pfsense_xmlrpc_client {
 
 	private $username, $password, $url, $logurl, $filenotice, $error;
 
-	public function __construct() {
+	public function __construct($hasync_client = []) {
 		global $config;
-		$hasync = config_get_path('hasync', []);
 		/* XMLRPC sync is not configured, nothing to do.
 		 * https://redmine.pfsense.org/issues/14182 */
-		if (empty($hasync)) {
-			$this->error = "XMLRPC Synchronization is not configured.";
+		if (empty($hasync_client)) {
+			$this->error = "XMLRPC Synchronization Client is not configured.";
 			return;
 		}
 
-		if (empty($hasync['username'])) {
+		if (empty($hasync_client['username'])) {
 			$username = "admin";
 		} else {
-			$username = $hasync['username'];
+			$username = $hasync_client['username'];
 		}
 		/* if port is empty lets rely on the protocol selection */
 		$port = config_get_path('system/webgui/port');
@@ -50,7 +49,7 @@ class pfsense_xmlrpc_client {
 				$port = "443";
 			}
 		}
-		$this->setConnectionData($hasync['synchronizetoip'], $port, $username, $hasync['password']);
+		$this->setConnectionData($hasync_client['synchronizetoip'], $port, $username, $hasync_client['password']);
 	}
 
 	public function setConnectionData($syncip, $port, $username, $password, $scheme = "") {
