@@ -173,18 +173,18 @@ function carp_sync_xml($rpc_client, $sections, $hasync_client_id) {
 	 * control of each backup node's hasync configuration.
 	 * Might look back into this at a later time...
 	 */
-	if (array_path_enabled($config_copy, 'hasync/xmlrpcclients/{$hasync_client_id}', 'adminsync')) {
-		array_set_path($xml, 'hasync/adminsync', array_get_path($config_copy, 'hasync/xmlrpcclients/{$hasync_client_id}/adminsync'));
+	if (array_path_enabled($config_copy, "hasync/xmlrpcclients/{$hasync_client_id}", 'adminsync')) {
+		array_set_path($xml, 'hasync/adminsync', array_get_path($config_copy, "hasync/xmlrpcclients/{$hasync_client_id}/adminsync"));
 	}
 
 	$resp = $rpc_client->xmlrpc_method('restore_config_section', $xml, 900);
 	if ($resp != null) {
 		$url = $rpc_client->getUrl();
 		update_filter_reload_status("XMLRPC sync successfully completed with {$url}.");
-		if (config_get_path('hasync/xmlrpcclients/{$hasync_client_id}/new_password')) {
+		if (config_get_path("hasync/xmlrpcclients/{$hasync_client_id}/new_password")) {
 			update_filter_reload_status("Updating XMLRPC sync password.");
-			config_set_path('hasync/xmlrpcclients/{$hasync_client_id}/password', config_get_path('hasync/xmlrpcclients/{$hasync_client_id}/new_password'));
-			config_del_path('hasync/xmlrpcclients/{$hasync_client_id}/new_password');
+			config_set_path("hasync/xmlrpcclients/{$hasync_client_id}/password", config_get_path("hasync/xmlrpcclients/{$hasync_client_id}/new_password"));
+			config_del_path("hasync/xmlrpcclients/{$hasync_client_id}/new_password");
 			write_config("Update XMLRPC sync password.");
 		}
 		return true;
